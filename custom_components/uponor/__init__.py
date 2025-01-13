@@ -56,10 +56,10 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
         "thermostats": thermostats
     }
 
-    def handle_set_variable(call):
+    async def handle_set_variable(call):
         var_name = call.data.get('var_name')
         var_value = call.data.get('var_value')
-        hass.data[DOMAIN]['state_proxy'].set_variable(var_name, var_value)
+        await hass.data[DOMAIN]['state_proxy'].set_variable(var_name, var_value)
 
     hass.services.async_register(DOMAIN, "set_variable", handle_set_variable)
 
@@ -190,7 +190,7 @@ class UponorStateProxy:
         var = thermostat + '_stat_battery_error'
         if var in self._data and self._data[var] == "1":
             return STATUS_ERROR_BATTERY
-        var = thermostat + '_stat_valve_position_err'
+        var = thermostat + '_stat_valve_position_err"'
         if var in self._data and self._data[var] == "1":
             return STATUS_ERROR_VALVE
         var = thermostat[0:3] + 'stat_general_system_alarm'
@@ -225,7 +225,7 @@ class UponorStateProxy:
         
         await self._hass.async_add_executor_job(lambda: self._client.send_data({'sys_heat_cool_mode': '1'}))
         self._data['sys_heat_cool_mode'] = '1'
-        self._hass.async_create_task(self.call_state_update())
+        await self.call_state_update()
 
     async def async_switch_to_heating(self):
         for thermostat in self._hass.data[DOMAIN]['thermostats']:
@@ -234,7 +234,7 @@ class UponorStateProxy:
 
         await self._hass.async_add_executor_job(lambda: self._client.send_data({'sys_heat_cool_mode': '0'}))
         self._data['sys_heat_cool_mode'] = '0'
-        self._hass.async_create_task(self.call_state_update())
+        await self.call_state_update()
 
     async def async_turn_on(self, thermostat):
         data = await self._store.async_load()
@@ -273,7 +273,7 @@ class UponorStateProxy:
         data = "1" if is_away else "0"
         await self._hass.async_add_executor_job(lambda: self._client.send_data({var: data}))
         self._data[var] = data
-        self._hass.async_create_task(self.call_state_update())
+        await self.call_state_update()
 
     def is_eco(self, thermostat):
         if self.get_eco_setback(thermostat) == 0:
@@ -299,19 +299,19 @@ class UponorStateProxy:
         try:
             self.next_sp_from_dt = dt_util.now()
             self._data = await self._hass.async_add_executor_job(lambda: self._client.get_data())
-            self._hass.async_create_task(self.call_state_update())
+            await self.call_state_update()
         except Exception as ex:
             _LOGGER.error("Uponor thermostat was unable to update: %s", ex)
         
-    def set_variable(self, var_name, var_value):
+    async def set_variable(self, var_name, var_value):
         _LOGGER.debug("Called set variable: name: %s, value: %s, data: %s", var_name, var_value, self._data)
         self._client.send_data({var_name: var_value})
         self._data[var_name] = var_value
-        self._hass.async_create_task(self.call_state_update())
+        await self.call_state_update()
 
     async def set_setpoint(self, thermostat, temp):
         var = thermostat + '_setpoint'
         setpoint = int(temp * 18 + self.get_active_setback(thermostat, temp) + 320)
         await self._hass.async_add_executor_job(lambda: self._client.send_data({var: setpoint}))
         self._data[var] = setpoint
-        self._hass.async_create_task(self.call_state_update())
+        await self.call_state_update()
