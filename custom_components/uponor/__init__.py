@@ -190,7 +190,7 @@ class UponorStateProxy:
         var = thermostat + '_stat_battery_error'
         if var in self._data and self._data[var] == "1":
             return STATUS_ERROR_BATTERY
-        var = thermostat + '_stat_valve_position_err"'
+        var = thermostat + '_stat_valve_position_err'
         if var in self._data and self._data[var] == "1":
             return STATUS_ERROR_VALVE
         var = thermostat[0:3] + 'stat_general_system_alarm'
