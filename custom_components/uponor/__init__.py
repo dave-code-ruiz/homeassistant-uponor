@@ -32,26 +32,31 @@ from .const import (
     TOO_LOW_HUMIDITY_LIMIT,
     DEFAULT_TEMP
 )
+from homeassistant.util.unit_system import UnitOfTemperature
+
+from .helper import get_unique_id_from_config_entry
+
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.CLIMATE, Platform.SWITCH]
 
-async def async_setup(hass: HomeAssistant, config: dict):
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN]["config"] = config.get(DOMAIN) or {}
-    return True
+# Import climate platform upfront to avoid blocking import during async execution
+from homeassistant.components import climate
 
+TEMP_CELSIUS = UnitOfTemperature.CELSIUS  # Updated constant
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     host = config_entry.data[CONF_HOST]
+    unique_id = get_unique_id_from_config_entry(config_entry)
     store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
 
-    state_proxy = await hass.async_add_executor_job(lambda: UponorStateProxy(hass, host, store))
+    # Create the state proxy in the executor thread to avoid blocking the event loop
+    state_proxy = await hass.async_add_executor_job(lambda: UponorStateProxy(hass, host, store, unique_id))
     await state_proxy.async_update()
     thermostats = state_proxy.get_active_thermostats()
 
-    hass.data[DOMAIN] = {
+    hass.data[unique_id] = {
         "state_proxy": state_proxy,
         "thermostats": thermostats
     }
@@ -59,12 +64,14 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     async def handle_set_variable(call):
         var_name = call.data.get('var_name')
         var_value = call.data.get('var_value')
-        await hass.data[DOMAIN]['state_proxy'].set_variable(var_name, var_value)
+        await hass.data[unique_id]['state_proxy'].set_variable(var_name, var_value)
 
     hass.services.async_register(DOMAIN, "set_variable", handle_set_variable)
 
+    # Forward setup for "climate" and "switch" platforms (done outside of the event loop)
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
 
+    # Track time interval for updates (use async function)
     async_track_time_interval(hass, state_proxy.async_update, SCAN_INTERVAL)
 
     config_entry.async_on_unload(config_entry.add_update_listener(async_update_options))
@@ -83,13 +90,14 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     return unload_ok
 
 class UponorStateProxy:
-    def __init__(self, hass, host, store):
+    def __init__(self, hass, host, store, unique_id):
         self._hass = hass
         self._client = UponorJnap(host)
         self._store = store
         self._data = {}
         self._storage_data = {}
         self.next_sp_from_dt = None
+        self._unique_id = unique_id
 
     # Thermostats config
 
@@ -219,7 +227,7 @@ class UponorStateProxy:
     # HVAC modes
 
     async def async_switch_to_cooling(self):
-        for thermostat in self._hass.data[DOMAIN]['thermostats']:
+        for thermostat in self._hass.data[self._unique_id]['thermostats']:
             if self.get_setpoint(thermostat) == self.get_min_limit(thermostat):
                 await self.set_setpoint(thermostat, self.get_max_limit(thermostat))
         
@@ -228,7 +236,7 @@ class UponorStateProxy:
         self._hass.async_create_task(self.call_state_update())
 
     async def async_switch_to_heating(self):
-        for thermostat in self._hass.data[DOMAIN]['thermostats']:
+        for thermostat in self._hass.data[self._unique_id]['thermostats']:
             if self.get_setpoint(thermostat) == self.get_max_limit(thermostat):
                 await self.set_setpoint(thermostat, self.get_min_limit(thermostat))
 
@@ -240,7 +248,7 @@ class UponorStateProxy:
         data = await self._store.async_load()
         self._storage_data = {} if data is None else data
         last_temp = self._storage_data[thermostat] if thermostat in self._storage_data else DEFAULT_TEMP
-        await self.set_setpoint(thermostat, last_temp)
+        await self._hass.async_add_executor_job(lambda: self.set_setpoint(thermostat, last_temp))
 
     async def async_turn_off(self, thermostat):
         data = await self._store.async_load()
@@ -248,7 +256,7 @@ class UponorStateProxy:
         self._storage_data[thermostat] = self.get_setpoint(thermostat)
         await self._store.async_save(self._storage_data)
         off_temp = self.get_max_limit(thermostat) if self.is_cool_enabled() else self.get_min_limit(thermostat)
-        await self.set_setpoint(thermostat, off_temp)
+        await self._hass.async_add_executor_job(lambda: self.set_setpoint(thermostat, off_temp))
 
     # Cooling
 
@@ -309,9 +317,28 @@ class UponorStateProxy:
         self._data[var_name] = var_value
         self._hass.async_create_task(self.call_state_update())
 
-    async def set_setpoint(self, thermostat, temp):
+    async def async_set_setpoint(self, thermostat, temperature):
+        """Async wrapper for set_setpoint."""
+        await self._hass.async_add_executor_job(self.set_setpoint, thermostat, temperature)
+
+    def set_setpoint(self, thermostat, temperature):
+        """Set the temperature setpoint for a thermostat."""
+        if thermostat not in self._data:
+            raise ValueError(f"Thermostat {thermostat} not found.")
+
+        self._client.set_temperature(thermostat, temperature)
+        self._data[thermostat]['setpoint'] = temperature  # Update local cache
+
+"""     def set_setpoint(self, thermostat, temp):
         var = thermostat + '_setpoint'
         setpoint = int(temp * 18 + self.get_active_setback(thermostat, temp) + 320)
-        await self._hass.async_add_executor_job(lambda: self._client.send_data({var: setpoint}))
+        self._client.send_data({var: setpoint})
         self._data[var] = setpoint
-        self._hass.async_create_task(self.call_state_update())
+
+        # Ensure async update
+        if hasattr(self, "call_state_update"):  
+            self._hass.loop.call_soon_threadsafe(self._hass.async_create_task, self.call_state_update())
+        else:
+            _LOGGER.warning("call_state_update() method not found in UponorStateProxy") """
+
+    
