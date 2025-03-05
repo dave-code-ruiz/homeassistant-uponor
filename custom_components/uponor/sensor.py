@@ -75,7 +75,7 @@ class UponorFloorTemperatureSensor(SensorEntity):
 
 class UponorRoomCurrentTemperatureSensor(SensorEntity):
 
-    def __init__(self, unique_instance_id, tate_proxy, thermostat):
+    def __init__(self, unique_instance_id, state_proxy, thermostat):
         self._unique_instance_id = unique_instance_id
         self._state_proxy = state_proxy
         self._thermostat = thermostat
