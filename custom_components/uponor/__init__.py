@@ -64,7 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     async def handle_set_variable(call):
         var_name = call.data.get('var_name')
         var_value = call.data.get('var_value')
-        await hass.data[unique_id]['state_proxy'].set_variable(var_name, var_value)
+        await hass.data[unique_id]['state_proxy'].async_set_variable(var_name, var_value)
 
     hass.services.async_register(DOMAIN, "set_variable", handle_set_variable)
 
@@ -229,7 +229,7 @@ class UponorStateProxy:
     async def async_switch_to_cooling(self):
         for thermostat in self._hass.data[self._unique_id]['thermostats']:
             if self.get_setpoint(thermostat) == self.get_min_limit(thermostat):
-                await self.set_setpoint(thermostat, self.get_max_limit(thermostat))
+                await self.async_set_setpoint(thermostat, self.get_max_limit(thermostat))
         
         await self._hass.async_add_executor_job(lambda: self._client.send_data({'sys_heat_cool_mode': '1'}))
         self._data['sys_heat_cool_mode'] = '1'
@@ -238,7 +238,7 @@ class UponorStateProxy:
     async def async_switch_to_heating(self):
         for thermostat in self._hass.data[self._unique_id]['thermostats']:
             if self.get_setpoint(thermostat) == self.get_max_limit(thermostat):
-                await self.set_setpoint(thermostat, self.get_min_limit(thermostat))
+                await self.async_set_setpoint(thermostat, self.get_min_limit(thermostat))
 
         await self._hass.async_add_executor_job(lambda: self._client.send_data({'sys_heat_cool_mode': '0'}))
         self._data['sys_heat_cool_mode'] = '0'
@@ -248,7 +248,7 @@ class UponorStateProxy:
         data = await self._store.async_load()
         self._storage_data = {} if data is None else data
         last_temp = self._storage_data[thermostat] if thermostat in self._storage_data else DEFAULT_TEMP
-        await self._hass.async_add_executor_job(lambda: self.set_setpoint(thermostat, last_temp))
+        await self.async_set_setpoint(thermostat, last_temp)
 
     async def async_turn_off(self, thermostat):
         data = await self._store.async_load()
@@ -256,7 +256,7 @@ class UponorStateProxy:
         self._storage_data[thermostat] = self.get_setpoint(thermostat)
         await self._store.async_save(self._storage_data)
         off_temp = self.get_max_limit(thermostat) if self.is_cool_enabled() else self.get_min_limit(thermostat)
-        await self._hass.async_add_executor_job(lambda: self.set_setpoint(thermostat, off_temp))
+        await self.async_set_setpoint(thermostat, off_temp)
 
     # Cooling
 
@@ -311,25 +311,24 @@ class UponorStateProxy:
         except Exception as ex:
             _LOGGER.error("Uponor thermostat was unable to update: %s", ex)
         
-    async def set_variable(self, var_name, var_value):
+    async def async_set_variable(self, var_name, var_value):
         _LOGGER.debug("Called set variable: name: %s, value: %s, data: %s", var_name, var_value, self._data)
-        self._client.send_data({var_name: var_value})
+        await self._hass.async_add_executor_job(lambda: self._client.send_data({var_name: var_value}))
         self._data[var_name] = var_value
         self._hass.async_create_task(self.call_state_update())
 
-    async def async_set_setpoint(self, thermostat, temperature):
-        """Async wrapper for set_setpoint."""
+    async def async_set_setpoint(self, thermostat, temp):
+        var = thermostat + '_setpoint'
+        setpoint = int(temp * 18 + self.get_active_setback(thermostat, temp) + 320)
+        await self._hass.async_add_executor_job(lambda: self._client.send_data({var: setpoint}))
+        self._data[var] = setpoint
+        self._hass.async_create_task(self.call_state_update())
+    
+"""    async def async_set_setpoint(self, thermostat, temperature):
+        # Async wrapper for set_setpoint.
         await self._hass.async_add_executor_job(self.set_setpoint, thermostat, temperature)
-
-    def set_setpoint(self, thermostat, temperature):
-        """Set the temperature setpoint for a thermostat."""
-        if thermostat not in self._data:
-            raise ValueError(f"Thermostat {thermostat} not found.")
-
-        self._client.set_temperature(thermostat, temperature)
-        self._data[thermostat]['setpoint'] = temperature  # Update local cache
-
-"""     def set_setpoint(self, thermostat, temp):
+        
+    def set_setpoint(self, thermostat, temp):
         var = thermostat + '_setpoint'
         setpoint = int(temp * 18 + self.get_active_setback(thermostat, temp) + 320)
         self._client.send_data({var: setpoint})
@@ -340,5 +339,3 @@ class UponorStateProxy:
             self._hass.loop.call_soon_threadsafe(self._hass.async_create_task, self.call_state_update())
         else:
             _LOGGER.warning("call_state_update() method not found in UponorStateProxy") """
-
-    
