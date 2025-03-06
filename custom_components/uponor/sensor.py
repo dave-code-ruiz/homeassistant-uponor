@@ -46,7 +46,7 @@ class UponorFloorTemperatureSensor(SensorEntity):
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, self._state_proxy.get_thermostat_id(self._thermostat))},
+            "identifiers": {(self._unique_instance_id, self._state_proxy.get_thermostat_id(self._thermostat))},
             "name": self._state_proxy.get_room_name(self._thermostat),
             "manufacturer": "Uponor",
             "model": self._state_proxy.get_model(),
@@ -88,7 +88,7 @@ class UponorRoomCurrentTemperatureSensor(SensorEntity):
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, self._state_proxy.get_thermostat_id(self._thermostat))},
+            "identifiers": {(self._unique_instance_id, self._state_proxy.get_thermostat_id(self._thermostat))},
             "name": self._state_proxy.get_room_name(self._thermostat),
             "manufacturer": "Uponor",
             "model": self._state_proxy.get_model(),
@@ -129,7 +129,7 @@ class UponorHumiditySensor(SensorEntity):
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, self._state_proxy.get_thermostat_id(self._thermostat))},
+            "identifiers": {(self._unique_instance_id, self._state_proxy.get_thermostat_id(self._thermostat))},
             "name": self._state_proxy.get_room_name(self._thermostat),
             "manufacturer": "Uponor",
             "model": self._state_proxy.get_model(),
