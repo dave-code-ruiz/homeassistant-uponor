@@ -34,7 +34,7 @@ class DomainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_HOST): str,
                 vol.Required(CONF_NAME, default=DEVICE_MANUFACTURER): str,
-                vol.Optional(CONF_UNIQUE_ID): str
+                vol.Required(CONF_UNIQUE_ID): str
             }
         )
 
